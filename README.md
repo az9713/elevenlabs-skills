@@ -1,5 +1,5 @@
 > **This is a fork/clone of [`elevenlabs/skills`](https://github.com/elevenlabs/skills) — the official ElevenLabs Agent Skills repository.**
-> All original skills are preserved. This fork adds a comprehensive **[Skills Guide](./SKILLS_GUIDE.md)** (what/why/how + best-practices audit for every skill) and **[Workflow Ideas](./WORKFLOW_IDEAS.md)** (8 creative multi-skill workflows with full implementation details).
+> All original skills are preserved. This fork adds a comprehensive **[Skills Guide](./SKILLS_GUIDE.md)** (what/why/how + best-practices audit for every skill) and **[Workflow Ideas](./WORKFLOW_IDEAS.md)** (14 creative multi-skill workflows with full implementation details).
 
 ---
 

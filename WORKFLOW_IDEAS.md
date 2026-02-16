@@ -1,8 +1,10 @@
 # Creative Multi-Skill Workflows
 
-Eight production-ready workflows that combine ElevenLabs skills in unexpected ways. Each workflow lists the skills it chains together, explains the motivation, and provides enough implementation detail to build it.
+Fourteen production-ready workflows that combine ElevenLabs skills and APIs in unexpected ways. Each workflow lists the skills it chains together, explains the motivation, and provides enough implementation detail to build it.
 
 **Skills referenced:** setup-api-key, text-to-speech, speech-to-text, sound-effects, music, agents, elevenlabs-transcribe
+
+**APIs beyond skills:** Text-to-Dialogue (`/v1/text-to-dialogue`), Voice Design (`/v1/text-to-voice/design`), Dubbing (`/v1/dubbing`), Audio Isolation (`/v1/audio-isolation`), Agent WebSocket monitoring (`/v1/convai/conversations/{id}/monitor`), Pronunciation Dictionaries
 
 ---
 
@@ -1231,17 +1233,1189 @@ Closes the loop from live AI calls to structured analytics to a consumable audio
 
 ---
 
-## Summary: Skill Combinations Used
+---
 
-| Workflow | TTS | STT | SFX | Music | Agents | Transcribe CLI |
-|----------|-----|-----|-----|-------|--------|----------------|
-| AI Podcast Factory | x | x | x | x | | |
-| Live Translation Booth | x | x | | | | |
-| Audio Adventure Engine | x | | x | x | x | |
-| Mood Journal | x | x | x | x | | |
-| Meeting Intelligence | x | | | | | x |
-| Ambient Workspace | | | x | x | x | |
-| Audiobook Narrator | x | x | | | | |
-| Call Analytics Dashboard | x | x | | | x | |
+# Part 2: Workflows Using Extended ElevenLabs APIs
 
-Every skill appears in at least two workflows. The most versatile skill is `text-to-speech` (6/8 workflows), followed by `speech-to-text` (5/8).
+These workflows go beyond the repo's skills to use additional ElevenLabs API endpoints -- Text-to-Dialogue, Voice Design, Dubbing, Audio Isolation, and Agent WebSocket monitoring.
+
+---
+
+## 9. AI Radio Drama Producer (Text-to-Dialogue)
+
+**APIs:** `Text-to-Dialogue` + `sound-effects` + `music`
+
+### Motivation
+
+The Text-to-Dialogue API (`/v1/text-to-dialogue`) with the Eleven v3 model generates multi-speaker conversations in a single API call -- complete with natural interruptions, overlapping cadence, and emotional cues. Combined with sound effects and music, this produces broadcast-quality radio dramas from a screenplay, with no manual audio editing.
+
+The key advantage over Workflow #1 (AI Podcast Factory) is that Text-to-Dialogue generates **a single, naturally-paced audio file** with multiple speakers, rather than stitching separate TTS calls together. Speakers interrupt, pause, and react to each other.
+
+### Architecture
+
+```
+Screenplay (tagged text)
+      |
+      v
+  Script Parser --> dialogue segments + SFX/music cues
+      |
+      +---> Text-to-Dialogue API (multiple speakers, one call)
+      +---> Sound Effects API (ambient + one-shots)
+      +---> Music API (score for each scene)
+      |
+      v
+  Audio Mixer (pydub) --> layers dialogue + SFX + music
+      |
+      v
+  Final radio drama MP3
+```
+
+### Implementation
+
+```python
+import requests
+import json
+import re
+import io
+import os
+from pydub import AudioSegment
+from elevenlabs.client import ElevenLabs
+
+client = ElevenLabs()
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+
+# --- Voice cast ---
+CAST = {
+    "DETECTIVE": "onwK4e9ZLuTAKqWW03F9",  # Daniel - authoritative
+    "SUSPECT":   "JBFqnCBsd6RMkjVDRZzb",  # George - nervous energy
+    "NARRATOR":  "EXAVITQu4vr4xnSDxMaL",  # Sarah - calm
+    "OFFICER":   "XB0fDUnXU5powFXDhCwa",  # Charlotte - professional
+}
+
+# --- Parse a screenplay into scenes ---
+def parse_screenplay(text: str) -> list[dict]:
+    """
+    Parse screenplay format:
+      [SCENE: Dark interrogation room]
+      [MUSIC: Tense noir jazz, slow brushed drums]
+      [SFX: Fluorescent light buzzing, chair scraping]
+      DETECTIVE: Where were you last night?
+      SUSPECT: [nervous laugh] I was... I was at home.
+      DETECTIVE: [slams table] Don't lie to me!
+      [SFX: Heavy door closing]
+    """
+    scenes = []
+    current_scene = {"name": "", "dialogue": [], "music": None, "sfx": []}
+
+    for line in text.strip().split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if m := re.match(r"\[SCENE:\s*(.*?)\]", line):
+            if current_scene["dialogue"]:
+                scenes.append(current_scene)
+            current_scene = {"name": m.group(1), "dialogue": [], "music": None, "sfx": []}
+        elif m := re.match(r"\[MUSIC:\s*(.*?)\]", line):
+            current_scene["music"] = m.group(1)
+        elif m := re.match(r"\[SFX:\s*(.*?)\]", line):
+            current_scene["sfx"].append(m.group(1))
+        elif m := re.match(r"(\w+):\s*(.*)", line):
+            character = m.group(1)
+            dialogue_text = m.group(2)
+            if character in CAST:
+                current_scene["dialogue"].append({
+                    "text": dialogue_text,
+                    "voice_id": CAST[character],
+                })
+
+    if current_scene["dialogue"]:
+        scenes.append(current_scene)
+    return scenes
+
+# --- Generate dialogue audio via Text-to-Dialogue API ---
+def generate_dialogue(inputs: list[dict], seed: int = 42) -> AudioSegment:
+    """
+    Call POST /v1/text-to-dialogue with Eleven v3.
+    Audio events in square brackets (e.g., [slams table]) are rendered
+    naturally by the model -- no separate SFX call needed for inline cues.
+    """
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/text-to-dialogue",
+        headers={
+            "xi-api-key": API_KEY,
+            "Content-Type": "application/json",
+        },
+        params={"output_format": "mp3_44100_128"},
+        json={
+            "model_id": "eleven_v3",
+            "inputs": inputs,
+            "seed": seed,
+            "settings": {"stability": 0.4},  # expressive for drama
+        },
+    )
+    response.raise_for_status()
+    return AudioSegment.from_mp3(io.BytesIO(response.content))
+
+# --- Produce a full radio drama ---
+def produce_radio_drama(screenplay: str, output_path: str = "drama.mp3"):
+    scenes = parse_screenplay(screenplay)
+    drama = AudioSegment.silent(0)
+
+    for i, scene in enumerate(scenes):
+        print(f"Producing scene {i+1}: {scene['name']}")
+
+        # 1. Generate scene music (if any)
+        music_seg = AudioSegment.silent(0)
+        if scene["music"]:
+            music_audio = b"".join(client.music.compose(
+                prompt=scene["music"],
+                music_length_ms=30000,
+                force_instrumental=True,
+            ))
+            music_seg = AudioSegment.from_mp3(io.BytesIO(music_audio)) - 16  # quiet bed
+
+        # 2. Generate ambient SFX
+        sfx_seg = AudioSegment.silent(0)
+        for sfx_prompt in scene["sfx"]:
+            sfx_audio = b"".join(client.text_to_sound_effects.convert(
+                text=sfx_prompt, duration_seconds=5.0, loop=True, prompt_influence=0.5,
+            ))
+            layer = AudioSegment.from_mp3(io.BytesIO(sfx_audio)) - 18
+            sfx_seg = sfx_seg.overlay(layer) if len(sfx_seg) > 0 else layer
+
+        # 3. Generate dialogue (single API call, natural multi-speaker pacing)
+        dialogue_seg = generate_dialogue(scene["dialogue"])
+
+        # 4. Mix: extend bed tracks to dialogue length, overlay
+        target_len = len(dialogue_seg) + 2000
+        if len(music_seg) > 0:
+            while len(music_seg) < target_len:
+                music_seg += music_seg
+            music_seg = music_seg[:target_len].fade_out(2000)
+        if len(sfx_seg) > 0:
+            while len(sfx_seg) < target_len:
+                sfx_seg += sfx_seg
+            sfx_seg = sfx_seg[:target_len]
+
+        scene_audio = AudioSegment.silent(target_len)
+        if len(music_seg) > 0:
+            scene_audio = scene_audio.overlay(music_seg)
+        if len(sfx_seg) > 0:
+            scene_audio = scene_audio.overlay(sfx_seg)
+        scene_audio = scene_audio.overlay(dialogue_seg, position=500)
+
+        drama += scene_audio + AudioSegment.silent(1500)  # gap between scenes
+
+    drama = drama.fade_in(1000).fade_out(2000)
+    drama.export(output_path, format="mp3")
+    return output_path
+
+# --- Example screenplay ---
+SCREENPLAY = """
+[SCENE: Dark interrogation room]
+[MUSIC: Tense noir jazz, slow brushed drums, muted trumpet]
+[SFX: Fluorescent light buzzing quietly]
+NARRATOR: The interrogation room smelled of stale coffee and bad decisions.
+DETECTIVE: Where were you last night between ten and midnight?
+SUSPECT: [nervous laugh] I was at home. Watching TV. You can check.
+DETECTIVE: [slams table] We already checked. Your neighbor says otherwise.
+SUSPECT: [long pause] Okay... okay. I went out for a walk. That's not a crime.
+[SFX: Heavy metal door slamming shut]
+NARRATOR: The detective leaned back. He'd heard this story before.
+"""
+
+produce_radio_drama(SCREENPLAY)
+```
+
+### What makes this creative
+
+Text-to-Dialogue renders inline audio events like `[slams table]` and `[nervous laugh]` as part of the speech generation -- no separate SFX pipeline needed for character actions. The Eleven v3 model handles natural turn-taking, pauses, and emotional shifts within a single API call.
+
+---
+
+## 10. Voice Casting Director (Voice Design API)
+
+**APIs:** `Voice Design` (`/v1/text-to-voice/design` + `/v1/text-to-voice`) + `text-to-dialogue` + `agents`
+
+### Motivation
+
+When building voice applications (games, agents, audiobooks), you need voices that match specific characters -- but the voice library might not have what you need. This workflow uses the Voice Design API to generate custom voices from text descriptions, auditions them in a dialogue sample, and deploys the winner to a conversational agent. The entire casting process is automated.
+
+### Architecture
+
+```
+Character brief (text description)
+      |
+      v
+  Voice Design API (/v1/text-to-voice/design)
+      |  returns 3 voice previews
+      v
+  Audition: Text-to-Dialogue with each candidate
+      |  generates sample dialogue for comparison
+      v
+  Selection (LLM scores or user picks)
+      |
+      v
+  Save Voice (/v1/text-to-voice)
+      |
+      v
+  Deploy to Agent or TTS pipeline
+```
+
+### Implementation
+
+```python
+import requests
+import json
+import base64
+import os
+from elevenlabs.client import ElevenLabs
+
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+client = ElevenLabs()
+
+# --- Step 1: Design voices from character descriptions ---
+def design_voice(description: str, sample_text: str = None) -> list[dict]:
+    """
+    Generate 3 voice previews from a text description.
+    Returns list of {generated_voice_id, audio_base64, duration_secs}.
+    """
+    body = {
+        "voice_description": description,
+        "model_id": "eleven_ttv_v3",
+    }
+    if sample_text:
+        body["text"] = sample_text
+    else:
+        body["auto_generate_text"] = True
+
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/text-to-voice/design",
+        headers={"xi-api-key": API_KEY, "Content-Type": "application/json"},
+        json=body,
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["previews"]
+
+# --- Step 2: Audition voices in a dialogue ---
+def audition_in_dialogue(
+    candidate_voice_id: str,
+    partner_voice_id: str,
+    dialogue_lines: list[dict],
+) -> bytes:
+    """Generate a dialogue sample with the candidate voice."""
+    # Replace placeholder with candidate voice
+    inputs = []
+    for line in dialogue_lines:
+        voice = candidate_voice_id if line["role"] == "candidate" else partner_voice_id
+        inputs.append({"text": line["text"], "voice_id": voice})
+
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/text-to-dialogue",
+        headers={"xi-api-key": API_KEY, "Content-Type": "application/json"},
+        json={"model_id": "eleven_v3", "inputs": inputs},
+    )
+    response.raise_for_status()
+    return response.content
+
+# --- Step 3: Save the selected voice ---
+def save_voice(generated_voice_id: str, name: str, description: str) -> str:
+    """Save a designed voice to the library. Returns the permanent voice_id."""
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/text-to-voice",
+        headers={"xi-api-key": API_KEY, "Content-Type": "application/json"},
+        json={
+            "voice_name": name,
+            "voice_description": description,
+            "generated_voice_id": generated_voice_id,
+        },
+    )
+    response.raise_for_status()
+    return response.json()["voice_id"]
+
+# --- Full casting pipeline ---
+def cast_character(
+    character_name: str,
+    character_description: str,
+    audition_lines: list[dict],
+    partner_voice_id: str = "JBFqnCBsd6RMkjVDRZzb",  # George as scene partner
+) -> str:
+    print(f"Casting: {character_name}")
+    print(f"Description: {character_description}")
+
+    # Generate 3 voice candidates
+    previews = design_voice(
+        description=character_description,
+        sample_text=f"Hello, my name is {character_name}. I'm ready for my audition.",
+    )
+
+    # Audition each candidate
+    audition_files = []
+    for i, preview in enumerate(previews):
+        print(f"  Auditioning candidate {i+1} ({preview['generated_voice_id'][:12]}...)")
+
+        # Save preview audio for review
+        audio_bytes = base64.b64decode(preview["audio_base_64"])
+        preview_path = f"audition_{character_name}_{i+1}_preview.mp3"
+        with open(preview_path, "wb") as f:
+            f.write(audio_bytes)
+
+        # Generate dialogue audition
+        dialogue_audio = audition_in_dialogue(
+            candidate_voice_id=preview["generated_voice_id"],
+            partner_voice_id=partner_voice_id,
+            dialogue_lines=audition_lines,
+        )
+        dialogue_path = f"audition_{character_name}_{i+1}_dialogue.mp3"
+        with open(dialogue_path, "wb") as f:
+            f.write(dialogue_audio)
+
+        audition_files.append({
+            "candidate": i + 1,
+            "generated_voice_id": preview["generated_voice_id"],
+            "preview": preview_path,
+            "dialogue": dialogue_path,
+            "duration": preview["duration_secs"],
+        })
+
+    # In production: use LLM to score or present to user for selection
+    # For now, select candidate 1
+    selected = audition_files[0]
+    print(f"  Selected candidate {selected['candidate']}")
+
+    # Save to library
+    voice_id = save_voice(
+        generated_voice_id=selected["generated_voice_id"],
+        name=character_name,
+        description=character_description,
+    )
+    print(f"  Saved as voice_id: {voice_id}")
+    return voice_id
+
+# --- Example: Cast a villain for a game ---
+villain_voice_id = cast_character(
+    character_name="Lord Vexar",
+    character_description=(
+        "A deep, gravelly male voice with a menacing British accent. "
+        "Speaks slowly and deliberately, as if savoring every word. "
+        "Age 50-60. Think theatrical villain with restrained intensity."
+    ),
+    audition_lines=[
+        {"role": "candidate", "text": "You think you can stop me? How delightfully naive."},
+        {"role": "partner", "text": "This ends now, Vexar."},
+        {"role": "candidate", "text": "[dark chuckle] Oh, my dear hero. This is only the beginning."},
+    ],
+)
+
+# Deploy to an agent
+agent = client.conversational_ai.agents.create(
+    name="Lord Vexar",
+    conversation_config={
+        "agent": {"first_message": "You dare approach my throne?", "language": "en"},
+        "tts": {"voice_id": villain_voice_id, "model_id": "eleven_flash_v2_5"},
+    },
+    prompt={
+        "prompt": "You are Lord Vexar, a theatrical villain. Stay in character.",
+        "llm": "gpt-4o-mini", "temperature": 0.9,
+    },
+)
+```
+
+### What makes this creative
+
+Automates the entire voice casting process -- from description to audition to deployment. The Voice Design API generates candidates from a character brief, Text-to-Dialogue auditions them in context (not isolation), and the winner gets saved to the library and deployed to an agent in one pipeline.
+
+---
+
+## 11. Video Localization Pipeline (Dubbing + STT + TTS)
+
+**APIs:** `Dubbing` (`/v1/dubbing`) + `speech-to-text` + `text-to-speech` + `Audio Isolation`
+
+### Motivation
+
+Content creators need to localize videos for global audiences. The ElevenLabs Dubbing API handles the heavy lifting (translation + voice-cloned dubbing), but a complete pipeline also needs: quality assurance transcription of the dubbed output, isolated clean audio for subtitle generation, and promotional clips in each target language.
+
+### Architecture
+
+```
+Source video (English)
+      |
+      v
+  Dubbing API (/v1/dubbing)
+      |  target_lang for each market
+      +---> Spanish dub
+      +---> French dub
+      +---> Japanese dub
+      |
+      v
+  For each dubbed output:
+      |
+      +---> Audio Isolation (clean up any artifacts)
+      +---> STT (generate subtitles with timestamps)
+      +---> TTS (generate promotional trailer narration)
+      |
+      v
+  Localized package per language:
+    - Dubbed video
+    - Clean audio track
+    - SRT subtitle file
+    - Promotional audio clip
+```
+
+### Implementation
+
+```python
+import requests
+import time
+import json
+import os
+from elevenlabs.client import ElevenLabs
+
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+client = ElevenLabs()
+
+# --- Step 1: Submit dubbing jobs ---
+def submit_dub(
+    source_url: str,
+    target_lang: str,
+    source_lang: str = "en",
+    name: str = None,
+) -> dict:
+    """Submit a video for dubbing. Returns dubbing_id and expected duration."""
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/dubbing",
+        headers={"xi-api-key": API_KEY},
+        data={
+            "source_url": source_url,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "name": name or f"dub_{target_lang}",
+            "num_speakers": 0,  # auto-detect
+            "highest_resolution": True,
+        },
+    )
+    response.raise_for_status()
+    return response.json()  # {"dubbing_id": "...", "expected_duration_sec": ...}
+
+def wait_for_dub(dubbing_id: str, poll_interval: int = 15) -> str:
+    """Poll until dubbing is complete. Returns status."""
+    while True:
+        response = requests.get(
+            f"https://api.elevenlabs.io/v1/dubbing/{dubbing_id}",
+            headers={"xi-api-key": API_KEY},
+        )
+        response.raise_for_status()
+        status = response.json().get("status", "unknown")
+        if status == "dubbed":
+            return status
+        elif status in ("failed", "error"):
+            raise RuntimeError(f"Dubbing failed: {response.json()}")
+        print(f"  Status: {status}, waiting {poll_interval}s...")
+        time.sleep(poll_interval)
+
+def download_dub(dubbing_id: str, language: str, output_path: str) -> str:
+    """Download the dubbed video/audio."""
+    response = requests.get(
+        f"https://api.elevenlabs.io/v1/dubbing/{dubbing_id}/audio/{language}",
+        headers={"xi-api-key": API_KEY},
+    )
+    response.raise_for_status()
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+    return output_path
+
+# --- Step 2: Clean audio with Audio Isolation ---
+def isolate_audio(audio_path: str, output_path: str) -> str:
+    """Remove background noise/artifacts from dubbed audio."""
+    with open(audio_path, "rb") as f:
+        response = requests.post(
+            "https://api.elevenlabs.io/v1/audio-isolation",
+            headers={"xi-api-key": API_KEY},
+            files={"audio": f},
+        )
+    response.raise_for_status()
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+    return output_path
+
+# --- Step 3: Generate subtitles from dubbed audio ---
+def generate_subtitles(audio_path: str, language: str) -> list[dict]:
+    """Transcribe dubbed audio and generate SRT-compatible timestamps."""
+    with open(audio_path, "rb") as f:
+        result = client.speech_to_text.convert(
+            file=f, model_id="scribe_v2",
+            timestamps_granularity="word",
+            language_code=language,
+        )
+
+    # Group words into subtitle segments (~8 words each)
+    subtitles = []
+    words = [w for w in result.words if w.type == "word"]
+    for i in range(0, len(words), 8):
+        segment = words[i:i+8]
+        subtitles.append({
+            "index": len(subtitles) + 1,
+            "start": segment[0].start,
+            "end": segment[-1].end,
+            "text": " ".join(w.text for w in segment),
+        })
+    return subtitles
+
+def write_srt(subtitles: list[dict], output_path: str):
+    """Write subtitles in SRT format."""
+    def format_time(seconds: float) -> str:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        s = int(seconds % 60)
+        ms = int((seconds % 1) * 1000)
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        for sub in subtitles:
+            f.write(f"{sub['index']}\n")
+            f.write(f"{format_time(sub['start'])} --> {format_time(sub['end'])}\n")
+            f.write(f"{sub['text']}\n\n")
+
+# --- Step 4: Generate promotional narration ---
+def generate_promo(text: str, language: str, output_path: str):
+    """Generate a promotional clip narration in the target language."""
+    audio = b"".join(client.text_to_speech.convert(
+        text=text,
+        voice_id="EXAVITQu4vr4xnSDxMaL",  # Sarah
+        model_id="eleven_multilingual_v2",
+        language_code=language,
+    ))
+    with open(output_path, "wb") as f:
+        f.write(audio)
+
+# --- Full pipeline ---
+def localize_video(
+    source_url: str,
+    target_languages: dict[str, str],  # {"es": "Spanish", "fr": "French", ...}
+    promo_texts: dict[str, str],       # {"es": "Disponible ahora...", ...}
+    output_dir: str = "localized",
+):
+    os.makedirs(output_dir, exist_ok=True)
+
+    for lang_code, lang_name in target_languages.items():
+        print(f"\n=== Localizing to {lang_name} ({lang_code}) ===")
+        lang_dir = f"{output_dir}/{lang_code}"
+        os.makedirs(lang_dir, exist_ok=True)
+
+        # Submit dub
+        result = submit_dub(source_url, target_lang=lang_code, name=f"Video - {lang_name}")
+        dubbing_id = result["dubbing_id"]
+        print(f"  Dubbing submitted: {dubbing_id} (est. {result['expected_duration_sec']}s)")
+
+        # Wait for completion
+        wait_for_dub(dubbing_id)
+        print(f"  Dubbing complete!")
+
+        # Download
+        dub_path = download_dub(dubbing_id, lang_code, f"{lang_dir}/dubbed.mp3")
+
+        # Clean audio
+        clean_path = isolate_audio(dub_path, f"{lang_dir}/clean_audio.mp3")
+        print(f"  Audio isolated")
+
+        # Generate subtitles
+        subtitles = generate_subtitles(clean_path, lang_code)
+        write_srt(subtitles, f"{lang_dir}/subtitles.srt")
+        print(f"  Subtitles generated ({len(subtitles)} segments)")
+
+        # Promo narration
+        if lang_code in promo_texts:
+            generate_promo(promo_texts[lang_code], lang_code, f"{lang_dir}/promo.mp3")
+            print(f"  Promo narration generated")
+
+# --- Example ---
+localize_video(
+    source_url="https://example.com/product-demo.mp4",
+    target_languages={"es": "Spanish", "fr": "French", "ja": "Japanese"},
+    promo_texts={
+        "es": "Descubre nuestro nuevo producto. Disponible ahora en tu idioma.",
+        "fr": "Decouvrez notre nouveau produit. Disponible maintenant dans votre langue.",
+        "ja": "新製品をご覧ください。あなたの言語でご利用いただけます。",
+    },
+)
+```
+
+### What makes this creative
+
+Chains four APIs into a complete localization factory: Dubbing for translation + voice cloning, Audio Isolation to clean artifacts, STT for auto-generated subtitles, and TTS for promotional audio -- producing a complete localized package per language from a single source video.
+
+---
+
+## 12. Podcast Cleanup & Remaster (Audio Isolation + STT + Text-to-Dialogue)
+
+**APIs:** `Audio Isolation` + `speech-to-text` + `Text-to-Dialogue`
+
+### Motivation
+
+Many podcasts and interviews are recorded in noisy environments -- cafes, conference floors, home offices with barking dogs. This workflow takes a noisy recording, isolates the speech, transcribes it with speaker labels, then re-records the entire conversation using Text-to-Dialogue to produce a studio-quality version with the original words but crystal-clear audio. Optionally preserves the original voices via voice cloning.
+
+### Architecture
+
+```
+Noisy podcast recording
+      |
+      v
+  Audio Isolation (/v1/audio-isolation)
+      |  cleaned audio
+      v
+  STT with diarization (scribe_v2)
+      |  speaker-labeled transcript
+      v
+  Voice matching (assign voice IDs to speakers)
+      |
+      v
+  Text-to-Dialogue (/v1/text-to-dialogue)
+      |  re-records the conversation with natural pacing
+      v
+  Studio-quality podcast + original transcript
+```
+
+### Implementation
+
+```python
+import requests
+import json
+import io
+import os
+from elevenlabs.client import ElevenLabs
+
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+client = ElevenLabs()
+
+def remaster_podcast(
+    noisy_audio_path: str,
+    speaker_voices: dict[str, str],  # {"speaker_0": "voice_id_1", "speaker_1": "voice_id_2"}
+    output_path: str = "remastered.mp3",
+) -> dict:
+    """
+    Take a noisy podcast, clean it, transcribe it, and re-record it
+    with Text-to-Dialogue for studio quality.
+    """
+
+    # 1. Isolate speech from background noise
+    print("Step 1: Isolating speech...")
+    with open(noisy_audio_path, "rb") as f:
+        isolation_response = requests.post(
+            "https://api.elevenlabs.io/v1/audio-isolation",
+            headers={"xi-api-key": API_KEY},
+            files={"audio": f},
+        )
+    isolation_response.raise_for_status()
+    clean_audio_path = noisy_audio_path.replace(".mp3", "_clean.mp3")
+    with open(clean_audio_path, "wb") as f:
+        f.write(isolation_response.content)
+
+    # 2. Transcribe with speaker diarization
+    print("Step 2: Transcribing with speaker labels...")
+    with open(clean_audio_path, "rb") as f:
+        transcript = client.speech_to_text.convert(
+            file=f, model_id="scribe_v2",
+            diarize=True, timestamps_granularity="word",
+        )
+
+    # 3. Build speaker-segmented dialogue
+    print("Step 3: Building dialogue segments...")
+    segments = []
+    current_speaker = None
+    current_text = []
+
+    for word in transcript.words:
+        if word.type != "word":
+            continue
+        if word.speaker_id != current_speaker:
+            if current_text and current_speaker:
+                segments.append({
+                    "speaker": current_speaker,
+                    "text": " ".join(current_text),
+                })
+            current_speaker = word.speaker_id
+            current_text = [word.text]
+        else:
+            current_text.append(word.text)
+
+    if current_text and current_speaker:
+        segments.append({"speaker": current_speaker, "text": " ".join(current_text)})
+
+    # 4. Re-record with Text-to-Dialogue
+    print(f"Step 4: Re-recording {len(segments)} segments with Text-to-Dialogue...")
+
+    # Text-to-Dialogue has a max of 10 unique voices and reasonable text limits
+    # Process in chunks if needed
+    CHUNK_SIZE = 20  # segments per API call
+    all_audio = []
+
+    for i in range(0, len(segments), CHUNK_SIZE):
+        chunk = segments[i:i + CHUNK_SIZE]
+        inputs = []
+        for seg in chunk:
+            voice_id = speaker_voices.get(seg["speaker"], list(speaker_voices.values())[0])
+            inputs.append({"text": seg["text"], "voice_id": voice_id})
+
+        response = requests.post(
+            "https://api.elevenlabs.io/v1/text-to-dialogue",
+            headers={"xi-api-key": API_KEY, "Content-Type": "application/json"},
+            json={
+                "model_id": "eleven_v3",
+                "inputs": inputs,
+                "settings": {"stability": 0.5},
+            },
+        )
+        response.raise_for_status()
+        all_audio.append(response.content)
+
+    # 5. Concatenate and export
+    from pydub import AudioSegment as AS
+    final = AS.silent(0)
+    for audio_bytes in all_audio:
+        segment = AS.from_mp3(io.BytesIO(audio_bytes))
+        final += segment + AS.silent(200)
+
+    final.export(output_path, format="mp3")
+    print(f"Remastered podcast saved to {output_path}")
+
+    return {
+        "output": output_path,
+        "original_transcript": transcript.text,
+        "segments": len(segments),
+        "speakers": list(set(s["speaker"] for s in segments)),
+    }
+
+# --- Example ---
+result = remaster_podcast(
+    noisy_audio_path="noisy_interview.mp3",
+    speaker_voices={
+        "speaker_0": "onwK4e9ZLuTAKqWW03F9",  # Daniel (interviewer)
+        "speaker_1": "JBFqnCBsd6RMkjVDRZzb",  # George (guest)
+    },
+)
+```
+
+### What makes this creative
+
+Three APIs in sequence transform unusable audio into broadcast quality: isolation removes noise, STT recovers the words with speaker labels, and Text-to-Dialogue re-records the conversation with natural multi-speaker pacing. The original content is preserved but the audio quality is transformed.
+
+---
+
+## 13. Live Agent QA Monitor (Agent WebSocket + STT + TTS)
+
+**APIs:** `Agent WebSocket monitoring` (`/v1/convai/conversations/{id}/monitor`) + `agents` + `speech-to-text` + `text-to-speech`
+
+### Motivation
+
+When deploying AI voice agents at scale (customer service, sales), supervisors need real-time visibility into live calls with the ability to intervene -- whisper coaching to the agent, barging into the call, or triggering a human takeover. The Agent WebSocket monitoring API provides exactly this, and combined with STT and TTS, enables a complete supervisor dashboard.
+
+### Architecture
+
+```
+Live agent call in progress
+      |
+      v
+  WebSocket monitor (/v1/convai/conversations/{id}/monitor)
+      |  real-time events: user_transcript, agent_response, vad_score
+      |
+      +---> Live transcript display
+      +---> Sentiment analysis (LLM on each turn)
+      +---> Alert triggers (compliance, escalation keywords)
+      |
+      v
+  Supervisor actions:
+      +---> Barge-in (inject message into conversation)
+      +---> End call
+      +---> Human takeover
+      +---> Post-call: TTS summary for supervisor review
+```
+
+### Implementation
+
+```python
+import asyncio
+import json
+import os
+import websockets
+from datetime import datetime
+from elevenlabs.client import ElevenLabs
+from openai import OpenAI
+
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+el_client = ElevenLabs()
+llm = OpenAI()
+
+# --- Real-time call monitor ---
+class CallMonitor:
+    def __init__(self, conversation_id: str):
+        self.conversation_id = conversation_id
+        self.transcript = []
+        self.alerts = []
+        self.sentiment_history = []
+
+    async def connect(self):
+        """Connect to the agent monitoring WebSocket."""
+        uri = (
+            f"wss://api.elevenlabs.io/v1/convai/conversations"
+            f"/{self.conversation_id}/monitor"
+        )
+        headers = {"xi-api-key": API_KEY}
+
+        async with websockets.connect(uri, extra_headers=headers) as ws:
+            print(f"[MONITOR] Connected to conversation {self.conversation_id}")
+
+            # Subscribe to events
+            await ws.send(json.dumps({
+                "type": "subscribe",
+                "events": [
+                    "user_transcript",
+                    "agent_response",
+                    "vad_score",
+                    "client_tool_call",
+                    "interruption",
+                ],
+            }))
+
+            async for message in ws:
+                event = json.loads(message)
+                await self.handle_event(event, ws)
+
+    async def handle_event(self, event: dict, ws):
+        event_type = event.get("type", "")
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        if event_type == "user_transcript":
+            text = event.get("text", "")
+            self.transcript.append({"role": "user", "text": text, "time": timestamp})
+            print(f"[{timestamp}] CUSTOMER: {text}")
+            await self.analyze_turn(text, "customer")
+
+        elif event_type == "agent_response":
+            text = event.get("text", "")
+            self.transcript.append({"role": "agent", "text": text, "time": timestamp})
+            print(f"[{timestamp}] AGENT: {text}")
+            await self.analyze_turn(text, "agent")
+
+        elif event_type == "interruption":
+            print(f"[{timestamp}] ** Customer interrupted agent **")
+
+        elif event_type == "client_tool_call":
+            tool = event.get("tool_name", "unknown")
+            print(f"[{timestamp}] TOOL CALL: {tool}")
+
+        elif event_type == "vad_score":
+            score = event.get("score", 0)
+            if score > 0.8:
+                print(f"[{timestamp}] [VAD: active speech detected]")
+
+    async def analyze_turn(self, text: str, speaker: str):
+        """Analyze each turn for sentiment and compliance flags."""
+        # Check for escalation keywords
+        ESCALATION_KEYWORDS = [
+            "supervisor", "manager", "lawsuit", "cancel", "angry",
+            "unacceptable", "report", "complaint", "lawyer",
+        ]
+        text_lower = text.lower()
+        for keyword in ESCALATION_KEYWORDS:
+            if keyword in text_lower:
+                alert = f"ESCALATION KEYWORD detected: '{keyword}' from {speaker}"
+                self.alerts.append(alert)
+                print(f"  !! ALERT: {alert}")
+                break
+
+    # --- Supervisor control commands ---
+    async def send_control(self, ws, command: str, **kwargs):
+        """Send a control command to the live conversation."""
+        msg = {"type": command, **kwargs}
+        await ws.send(json.dumps(msg))
+        print(f"[CONTROL] Sent: {command}")
+
+    async def barge_in(self, ws, message: str):
+        """Inject a message into the agent's context."""
+        await self.send_control(ws, "contextual_update", text=message)
+
+    async def end_call(self, ws):
+        """Force-end the current call."""
+        await self.send_control(ws, "end_conversation")
+
+    # --- Post-call summary ---
+    def generate_summary(self) -> str:
+        """Generate a post-call audio summary for the supervisor."""
+        transcript_text = "\n".join(
+            f"[{t['role'].upper()}] {t['text']}" for t in self.transcript
+        )
+
+        analysis = llm.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": (
+                    "Summarize this customer call in 3 sentences for a supervisor. "
+                    "Note: sentiment, whether the issue was resolved, any concerning moments."
+                )},
+                {"role": "user", "content": transcript_text},
+            ],
+        )
+        summary_text = analysis.choices[0].message.content
+
+        # Generate audio summary
+        audio = b"".join(el_client.text_to_speech.convert(
+            text=f"Call summary. {summary_text}",
+            voice_id="onwK4e9ZLuTAKqWW03F9",
+            model_id="eleven_flash_v2_5",
+        ))
+
+        output_path = f"call_summary_{self.conversation_id[:8]}.mp3"
+        with open(output_path, "wb") as f:
+            f.write(audio)
+        return output_path
+
+# --- Usage ---
+async def monitor_call(conversation_id: str):
+    monitor = CallMonitor(conversation_id)
+    try:
+        await monitor.connect()
+    except websockets.exceptions.ConnectionClosed:
+        print("[MONITOR] Call ended")
+    finally:
+        summary_path = monitor.generate_summary()
+        print(f"\nPost-call summary: {summary_path}")
+        if monitor.alerts:
+            print(f"Alerts triggered: {len(monitor.alerts)}")
+            for alert in monitor.alerts:
+                print(f"  - {alert}")
+
+# asyncio.run(monitor_call("conversation-id-here"))
+```
+
+### What makes this creative
+
+The Agent WebSocket monitoring API enables a live supervision layer over AI phone agents -- real-time transcript streaming, keyword-based escalation alerts, and supervisor intervention (barge-in, takeover, end call). Post-call, the same pipeline generates an audio summary. This is the missing piece for deploying voice agents at enterprise scale.
+
+---
+
+## 14. Pronunciation-Aware Technical Narrator (Pronunciation Dictionaries + TTS + STT)
+
+**APIs:** `Pronunciation Dictionaries` + `text-to-speech` + `speech-to-text` + `Text-to-Dialogue`
+
+### Motivation
+
+Technical content (medical, legal, scientific, brand-specific) is full of terms that TTS models mispronounce -- drug names, API endpoints, brand neologisms, acronyms. This workflow creates a pronunciation dictionary from a glossary, generates audio with correct pronunciation, then validates the output with STT to catch any remaining errors. For dialogue content (e.g., doctor-patient conversations), it feeds the dictionary into Text-to-Dialogue.
+
+### Architecture
+
+```
+Technical glossary (term -> pronunciation)
+      |
+      v
+  Create Pronunciation Dictionary (/v1/pronunciation-dictionaries)
+      |  dictionary_id + version_id
+      v
+  TTS with dictionary attached
+      |  generates audio with correct pronunciation
+      v
+  STT validation pass
+      |  transcribes output, compares against expected terms
+      v
+  Report: which terms were pronounced correctly vs. need adjustment
+```
+
+### Implementation
+
+```python
+import requests
+import json
+import os
+from elevenlabs.client import ElevenLabs
+
+API_KEY = os.getenv("ELEVENLABS_API_KEY")
+client = ElevenLabs()
+
+# --- Step 1: Create a pronunciation dictionary ---
+def create_pronunciation_dictionary(
+    name: str,
+    entries: list[dict],  # [{"term": "GLP-1", "pronunciation": "G L P one"}, ...]
+) -> dict:
+    """
+    Create a pronunciation dictionary using phoneme or alias rules.
+
+    Entries can use:
+    - alias: {"term": "CRISPR", "alias": "krisper"}
+    - IPA: {"term": "acetaminophen", "ipa": "əˌsiːtəˈmɪnəfɪn"}
+    """
+    # Build the XML rules file
+    rules = ['<?xml version="1.0" encoding="UTF-8"?>']
+    rules.append("<lexicon>")
+    for entry in entries:
+        if "ipa" in entry:
+            rules.append(f'  <lexeme>')
+            rules.append(f'    <grapheme>{entry["term"]}</grapheme>')
+            rules.append(f'    <phoneme alphabet="ipa">{entry["ipa"]}</phoneme>')
+            rules.append(f'  </lexeme>')
+        elif "alias" in entry:
+            rules.append(f'  <lexeme>')
+            rules.append(f'    <grapheme>{entry["term"]}</grapheme>')
+            rules.append(f'    <alias>{entry["alias"]}</alias>')
+            rules.append(f'  </lexeme>')
+    rules.append("</lexicon>")
+
+    rules_content = "\n".join(rules)
+
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/pronunciation-dictionaries/add-from-file",
+        headers={"xi-api-key": API_KEY},
+        files={"file": ("dictionary.pls", rules_content, "application/xml")},
+        data={"name": name, "description": f"Technical terms for {name}"},
+    )
+    response.raise_for_status()
+    data = response.json()
+    return {
+        "dictionary_id": data["id"],
+        "version_id": data["version_id"],
+        "name": name,
+    }
+
+# --- Step 2: Generate audio with dictionary ---
+def narrate_with_dictionary(
+    text: str,
+    dictionary: dict,
+    voice_id: str = "onwK4e9ZLuTAKqWW03F9",
+    output_path: str = "narration.mp3",
+) -> str:
+    """Generate TTS audio with pronunciation dictionary applied."""
+    audio = b"".join(client.text_to_speech.convert(
+        text=text,
+        voice_id=voice_id,
+        model_id="eleven_multilingual_v2",
+        pronunciation_dictionary_locators=[{
+            "pronunciation_dictionary_id": dictionary["dictionary_id"],
+            "version_id": dictionary["version_id"],
+        }],
+    ))
+    with open(output_path, "wb") as f:
+        f.write(audio)
+    return output_path
+
+# --- Step 3: Validate pronunciation with STT ---
+def validate_pronunciation(
+    audio_path: str,
+    expected_terms: list[str],
+) -> dict:
+    """Transcribe the audio and check if expected terms appear correctly."""
+    with open(audio_path, "rb") as f:
+        result = client.speech_to_text.convert(
+            file=f, model_id="scribe_v2",
+            keyterms=expected_terms,  # bias STT toward these terms
+        )
+
+    transcript = result.text.lower()
+    report = {"transcript": result.text, "results": []}
+
+    for term in expected_terms:
+        found = term.lower() in transcript
+        report["results"].append({
+            "term": term,
+            "found_in_transcript": found,
+            "status": "PASS" if found else "CHECK",
+        })
+
+    passed = sum(1 for r in report["results"] if r["status"] == "PASS")
+    report["summary"] = f"{passed}/{len(expected_terms)} terms validated"
+    return report
+
+# --- Step 4: Dialogue with pronunciation dictionary ---
+def technical_dialogue_with_dictionary(
+    dialogue_inputs: list[dict],
+    dictionary: dict,
+    output_path: str = "technical_dialogue.mp3",
+) -> str:
+    """Generate a multi-speaker technical dialogue with pronunciation rules."""
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/text-to-dialogue",
+        headers={"xi-api-key": API_KEY, "Content-Type": "application/json"},
+        json={
+            "model_id": "eleven_v3",
+            "inputs": dialogue_inputs,
+            "pronunciation_dictionary_locators": [{
+                "pronunciation_dictionary_id": dictionary["dictionary_id"],
+                "version_id": dictionary["version_id"],
+            }],
+        },
+    )
+    response.raise_for_status()
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+    return output_path
+
+# --- Full pipeline example: Medical narration ---
+# 1. Define glossary
+medical_glossary = [
+    {"term": "GLP-1", "alias": "G L P one"},
+    {"term": "HbA1c", "alias": "hemoglobin A one C"},
+    {"term": "semaglutide", "alias": "sem-ah-GLOO-tide"},
+    {"term": "tirzepatide", "alias": "ter-ZEP-ah-tide"},
+    {"term": "SGLT2", "alias": "S G L T two"},
+    {"term": "metformin", "ipa": "mɛtˈfɔːrmɪn"},
+]
+
+# 2. Create dictionary
+dictionary = create_pronunciation_dictionary("Endocrinology Terms", medical_glossary)
+print(f"Dictionary created: {dictionary['dictionary_id']}")
+
+# 3. Generate narration
+narration_text = (
+    "The patient was started on semaglutide, a GLP-1 receptor agonist, "
+    "after their HbA1c remained above target on metformin alone. "
+    "The care team also considered tirzepatide and an SGLT2 inhibitor "
+    "as alternative options."
+)
+audio_path = narrate_with_dictionary(narration_text, dictionary)
+print(f"Narration generated: {audio_path}")
+
+# 4. Validate
+report = validate_pronunciation(
+    audio_path,
+    expected_terms=["semaglutide", "GLP-1", "HbA1c", "metformin", "tirzepatide", "SGLT2"],
+)
+print(f"Validation: {report['summary']}")
+for r in report["results"]:
+    print(f"  {r['term']}: {r['status']}")
+
+# 5. Generate a doctor-patient dialogue with correct pronunciation
+dialogue_path = technical_dialogue_with_dictionary(
+    dialogue_inputs=[
+        {"text": "Your HbA1c is still at 8.2. I think we should add semaglutide.", "voice_id": "onwK4e9ZLuTAKqWW03F9"},
+        {"text": "Is that the GLP-1 medication? I've heard about tirzepatide too.", "voice_id": "EXAVITQu4vr4xnSDxMaL"},
+        {"text": "Both are good options. Semaglutide has more long-term data. We'll keep the metformin as well.", "voice_id": "onwK4e9ZLuTAKqWW03F9"},
+    ],
+    dictionary=dictionary,
+)
+print(f"Technical dialogue generated: {dialogue_path}")
+```
+
+### What makes this creative
+
+Closes the pronunciation quality loop: dictionary ensures correct TTS pronunciation, STT validation catches failures, and keyterm prompting biases the transcription toward the expected terms for accurate comparison. Works with both single-speaker TTS and multi-speaker Text-to-Dialogue.
+
+---
+
+## Summary: All Workflow Combinations
+
+| # | Workflow | TTS | STT | SFX | Music | Agents | CLI | Dialogue | Voice Design | Dubbing | Isolation | Monitor | Pron. Dict |
+|---|----------|-----|-----|-----|-------|--------|-----|----------|-------------|---------|-----------|---------|------------|
+| 1 | AI Podcast Factory | x | x | x | x | | | | | | | | |
+| 2 | Live Translation Booth | x | x | | | | | | | | | | |
+| 3 | Audio Adventure Engine | x | | x | x | x | | | | | | | |
+| 4 | Mood Journal | x | x | x | x | | | | | | | | |
+| 5 | Meeting Intelligence | x | | | | | x | | | | | | |
+| 6 | Ambient Workspace | | | x | x | x | | | | | | | |
+| 7 | Audiobook Narrator | x | x | | | | | | | | | | |
+| 8 | Call Analytics Dashboard | x | x | | | x | | | | | | | |
+| 9 | AI Radio Drama | | | x | x | | | x | | | | | |
+| 10 | Voice Casting Director | | | | | x | | x | x | | | | |
+| 11 | Video Localization | x | x | | | | | | | x | x | | |
+| 12 | Podcast Remaster | | x | | | | | x | | | x | | |
+| 13 | Live Agent QA Monitor | x | | | | x | | | | | | x | |
+| 14 | Technical Narrator | x | x | | | | | x | | | | | x |
+
+**API coverage:** Every ElevenLabs API product appears in at least one workflow. The new workflows (#9-14) specifically showcase the APIs that go beyond the repo's skills.
