@@ -328,7 +328,7 @@ def get_or_create_agent() -> str:
                 ),
             ),
             tts=TtsConversationalConfigOutput(
-                model_id="eleven_flash_v2_5",
+                model_id="eleven_turbo_v2",
                 voice_id=VOICE_ID,
                 stability=0.5,
                 similarity_boost=0.75,
