@@ -1,0 +1,42 @@
+{
+  "source": "output\\test_conversation.mp3",
+  "output": "C:\\Users\\simon\\Downloads\\elevenlabs_skills\\playground\\voice-migration\\output\\migrated_conversation.mp3",
+  "speakers_found": [
+    "speaker_0",
+    "speaker_1"
+  ],
+  "speakers_remixed": [
+    "speaker_0"
+  ],
+  "segments_total": 6,
+  "segments_remixed": 3,
+  "timing_reports": [
+    {
+      "segment": 0,
+      "character": "speaker_0",
+      "original_ms": 4219,
+      "remixed_ms": 4258,
+      "drift_ms": 39,
+      "drift_pct": 0.9,
+      "acceptable": true
+    },
+    {
+      "segment": 2,
+      "character": "speaker_0",
+      "original_ms": 3420,
+      "remixed_ms": 3474,
+      "drift_ms": 54,
+      "drift_pct": 1.6,
+      "acceptable": true
+    },
+    {
+      "segment": 4,
+      "character": "speaker_0",
+      "original_ms": 3741,
+      "remixed_ms": 3788,
+      "drift_ms": 47,
+      "drift_pct": 1.3,
+      "acceptable": true
+    }
+  ]
+}
