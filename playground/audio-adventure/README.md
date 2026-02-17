@@ -97,3 +97,7 @@ DM: As you hold onto the orb, the forest around you dissolves, replaced by a
     Will you cross the bridge to explore further, or stay and examine the
     orb's magic in more detail?
 ```
+
+## Audio Recording
+
+`audio_adventure_soundtrack.m4a` contains the extracted soundtrack from a test session. Note: the human player's voice was not captured in the recording for unknown reasons — only the Dungeon Master's voice, background music, ambient sounds, and sound effects are audible.
