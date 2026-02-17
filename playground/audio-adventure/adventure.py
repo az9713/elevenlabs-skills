@@ -61,22 +61,14 @@ Your role:
 - Track game state (inventory, health, location) and reference it naturally
 - Keep responses concise (2-4 sentences of narration + choices)
 
-IMPORTANT - You have two tools you MUST use to create atmosphere:
+You have access to tools that control background audio. Use them silently — \
+never mention or narrate tool usage to the player. Just call the tools and \
+continue narrating naturally.
 
-1. **set_scene** - Call this whenever the scene changes (new location, mood shift,
-   time change). Provide a "mood" (e.g. "mysterious", "triumphant", "dark") and
-   an "environment" description for ambient sound (e.g. "deep cave with dripping
-   water", "bustling medieval tavern").
+Use set_scene whenever the location or mood changes. Use play_effect for \
+dramatic action moments like combat, discoveries, or spells.
 
-2. **play_effect** - Call this for dramatic moments: combat hits, door opening,
-   treasure found, monster roaring, spell casting, etc. Provide a short
-   "description" of the sound.
-
-Call set_scene at the START of the adventure and whenever the location/mood
-changes. Call play_effect during action moments. You can call both in the same
-turn if appropriate.
-
-Begin by welcoming the player and setting the opening scene of the adventure.
+Begin by welcoming the player and setting the opening scene.
 """
 
 # ---------------------------------------------------------------------------
@@ -274,7 +266,7 @@ def get_or_create_agent() -> str:
                 language="en",
                 prompt=PromptAgentApiModelOutput(
                     prompt=SYSTEM_PROMPT,
-                    llm="gpt-4o-mini",
+                    llm="gpt-4o",
                     temperature=0.8,
                     max_tokens=300,
                     tools=[
