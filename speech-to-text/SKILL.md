@@ -158,6 +158,7 @@ Monitor usage via `request-id` response header:
 response = client.speech_to_text.convert.with_raw_response(file=audio_file, model_id="scribe_v2")
 result = response.parse()
 print(f"Request ID: {response.headers.get('request-id')}")
+```
 
 ## Real-Time Streaming
 
