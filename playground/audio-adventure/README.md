@@ -11,18 +11,16 @@ python adventure.py
 
 First run creates the Dungeon Master agent via API. Subsequent runs reuse it.
 
-## Known Issues
+## Sample Transcript (with working audio)
 
-- **Sound effects not triggered**: The agent reads tool calls as text (e.g. `set_scene({ mood: "mysterious", ... })`) instead of executing them as client tools. The `set_scene` and `play_effect` handlers are registered but the agent outputs tool invocations as narrated speech rather than actual tool calls. This means background music and sound effects are not generated/played.
-
-## Sample Transcript
+Music, ambient sounds, and sound effects all generate and play via pygame.mixer channels.
 
 ```
 ============================================================
   IMMERSIVE AUDIO ADVENTURE ENGINE
   Speak into your mic to play. Press Enter to quit.
 ============================================================
-Using existing agent: agent_8201khn80xm3f89rmaf32gyh2few
+Using existing agent: agent_1701khn918vjfv4vvsjmfz1syj75
 
 Connecting to Dungeon Master...
 Connected! Speak to play your adventure.
@@ -32,81 +30,70 @@ DM: Welcome, brave adventurer! I am your Dungeon Master. A world of mystery
 
 You: Yes, I am.
 
-DM: set_scene({ mood: "mysterious", environment: "dense forest with whispering
-    leaves" });
+>> set_scene: mood=mysterious, environment=dense forest with rustling leaves
+   and distant animal calls
+  [Music] Generating: mysterious / dense forest with rustling leaves...
+  [Music] Generated (468KB)
+  [Ambient] Generating: dense forest with rustling leaves and distant animal calls
+  [Ambient] Generated (157KB)
 
-    You find yourself standing in a dense forest, where the moonlight barely
-    pierces through the thick canopy. The air is filled with the sounds of
-    nocturnal creatures, and the faint rustling of leaves hints at unseen
-    movement. A narrow path winds deeper into the woods, while to your left,
-    you hear the gentle flow of a stream.
+DM: You find yourself at the edge of an ancient, dense forest. The rustling
+    of leaves whispers secrets of old, while distant animal calls echo through
+    the trees. A narrow path stretches ahead, barely visible under the dappled
+    sunlight. Will you venture deeper into the forest, or perhaps inspect the
+    strange stone structure to your left?
 
-    What would you like to do? You can choose to follow the path deeper into
-    the forest, investigate the stream, or proceed cautiously off the trail.
+You: Deeper into the forest
 
-You: Deeper into the forest.
+>> set_scene: mood=tense, environment=deep forest with thick underbrush and
+   eerie silence
+  [Music] Generating: tense / deep forest with thick underbrush...
+  [Music] Generated (468KB)
+  [Ambient] Generating: deep forest with thick underbrush and eerie silence
+  [Ambient] Generated (157KB)
 
-DM: play_effect({ description: "soft footsteps crunching on leaves" });
+>> play_effect: soft glow illuminating the dark forest
+  [SFX] Generating: soft glow illuminating the dark forest
+  [SFX] Generated (47KB)
 
-    You step onto the narrow path, your footsteps muffled by the carpet of
-    leaves beneath you. As you venture deeper into the forest, the shadows
-    grow thicker, and the sounds of the night transform into an eerie silence.
-    Suddenly, you come upon a clearing where an ancient stone altar sits,
-    covered in moss and surrounded by flickering blue flames.
+DM: You step cautiously into the depths of the forest. The trees grow thicker,
+    and an eerie silence envelops the area, broken only by your footsteps
+    crunching on fallen leaves. Suddenly, you notice a faint glow emanating
+    from behind a cluster of trees. Do you choose to investigate the source
+    of the light, or continue along the path?
 
-    What will you do next? You can examine the altar, search the area for
-    clues, or retreat back to the path.
+You: Investigate source of light
 
-You: Search the area for clues.
+DM: You move towards the soft glow, each step revealing more of the enchanted
+    light. As you approach, you discover a shimmering orb hovering above a
+    mossy stone altar. The orb pulses gently with a warm, inviting light. Do
+    you reach out to touch the orb, or step back to observe it from a distance?
 
-DM: play_effect({ description: "soft rustling as leaves are moved" });
+You: Reach out to touch the orb
 
-    You carefully search the area around the ancient stone altar, moving aside
-    the overgrown vines and brushing away the leaves. Among the stones, you
-    discover a small, intricately carved dagger, its blade shimmering even in
-    the low light. You also find strange symbols etched into the ground,
-    hinting at a forgotten ritual.
+>> play_effect: magical hum as your hand approaches the orb
+  [SFX] Generating: magical hum as your hand approaches the orb
+  [SFX] Generated (47KB)
 
-    What would you like to do now? You can take the dagger, examine the
-    symbols more closely, or inspect the altar itself.
+DM: As your fingers draw near the orb, a gentle hum fills the air, and a
+    tingling sensation courses through your hand. The orb feels warm and
+    alive, resonating with a mysterious energy. Suddenly, the forest around
+    you begins to shift and change. Do you hold onto the orb to see where
+    it takes you, or pull your hand away?
 
-You: Take the dagger.
+You: Hold on.
 
-DM: play_effect({ description: "metallic clink as the dagger is picked up" });
+>> set_scene: mood=otherworldly, environment=mystical realm with swirling
+   colors and floating islands
+  [Music] Generating: otherworldly / mystical realm with swirling colors...
+  [Music] Generated (468KB)
+  [Ambient] Generating: mystical realm with swirling colors and floating islands
+  [Ambient] Generated (157KB)
 
-    You grasp the dagger firmly, feeling its cool metal in your hand. As you
-    lift it from the ground, a rush of energy courses through you, and you
-    sense that this blade has some magical properties. With your new weapon in
-    your possession, the night feels a little less foreboding.
-
-    What will you do next? You can examine the symbols on the ground, inspect
-    the altar, or continue deeper into the forest.
-
-You: Continue deeper into the forest.
-
-DM: set_scene({ mood: "tense", environment: "dark forest with flickering
-    shadows" });
-
-    With the dagger in hand, you press onward into the depths of the forest.
-    The air grows heavier, and the shadows seem to twist and dance around you.
-    Suddenly, you hear a low growl echoing through the trees, sending a chill
-    down your spine. A pair of glowing eyes appear in the darkness, watching
-    you intently.
-
-    What will you do? You can confront the creature, attempt to sneak past
-    it, or find a place to hide.
-
-You: Confront the creature.
-
-DM: play_effect({ description: "a tense growl reverberating through the
-    forest" });
-
-    You stand your ground, gripping the dagger tightly as you confront the
-    creature. Emerging from the shadows, it reveals itself to be a large
-    wolf, its fur dark as night and eyes gleaming like emeralds. It sniffs
-    the air, sizing you up, and you sense an intelligence behind its gaze.
-
-    What will you do next? You can attempt to communicate with the wolf,
-    prepare to defend yourself, or try to intimidate it with a show of
-    strength.
+DM: As you hold onto the orb, the forest around you dissolves, replaced by a
+    mystical realm of swirling colors and floating islands. The air is filled
+    with a symphony of ethereal sounds, and the ground beneath you feels
+    light and buoyant. Ahead, a winding bridge of light connects the islands.
+    Will you cross the bridge to explore further, or stay and examine the
+    orb's magic in more detail?
 ```
