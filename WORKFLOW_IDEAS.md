@@ -2419,3 +2419,7 @@ Closes the pronunciation quality loop: dictionary ensures correct TTS pronunciat
 | 14 | Technical Narrator | x | x | | | | | x | | | | | x |
 
 **API coverage:** Every ElevenLabs API product appears in at least one workflow. The new workflows (#9-14) specifically showcase the APIs that go beyond the repo's skills.
+
+---
+
+**Next:** See **[Advanced Workflows](./ADVANCED_WORKFLOWS.md)** for 10 more production-grade workflows (#15-24) that leverage the full 2026 ElevenLabs platform: C2PA content signing, MCP tools, custom guardrails, agent version control, A/B testing, entity detection, regional endpoints, Voice Remixing, batch calling, WhatsApp outbound, and more.
